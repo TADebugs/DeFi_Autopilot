@@ -1,0 +1,319 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+/**
+ * @title PortfolioManager
+ * @dev Main contract for DeFi Autopilot portfolio management
+ * Handles user deposits, withdrawals, and automated rebalancing logic
+ */
+contract PortfolioManager is ReentrancyGuard, Ownable, Pausable {
+    using SafeERC20 for IERC20;
+
+    struct Portfolio {
+        address owner;
+        uint256 totalValue;
+        uint256 lastRebalance;
+        uint8 riskProfile; // 1=conservative, 2=balanced, 3=aggressive
+        bool autoRebalanceEnabled;
+        string currentProtocol;
+        uint256 currentYield; // APY in basis points (100 = 1%)
+        mapping(address => uint256) tokenBalances;
+    }
+
+    struct RebalanceAction {
+        address user;
+        string fromProtocol;
+        string toProtocol;
+        uint256 amount;
+        uint256 expectedYield;
+        uint256 gasCost;
+        uint256 timestamp;
+        bool executed;
+    }
+
+    // State variables
+    mapping(address => Portfolio) public portfolios;
+    mapping(address => bool) public authorizedRebalancers;
+    mapping(string => address) public protocolAdapters;
+    
+    RebalanceAction[] public pendingRebalances;
+    uint256 public totalManagedAssets;
+    uint256 public constant MIN_DEPOSIT = 0.1 ether;
+    uint256 public constant MAX_GAS_THRESHOLD = 0.02 ether;
+    uint256 public constant MIN_PROFIT_BPS = 50; // 0.5% minimum profit
+
+    // Events
+    event PortfolioCreated(
+        address indexed user, 
+        uint256 initialDeposit, 
+        uint8 riskProfile
+    );
+    
+    event PortfolioRebalanced(
+        address indexed user,
+        string fromProtocol,
+        string toProtocol,
+        uint256 amount,
+        uint256 newYield
+    );
+    
+    event AutoRebalanceToggled(address indexed user, bool enabled);
+    event EmergencyPause(address indexed admin, string reason);
+    event RebalancerAuthorized(address indexed rebalancer, bool authorized);
+
+    // Modifiers
+    modifier onlyPortfolioOwner(address user) {
+        require(portfolios[user].owner == msg.sender, "Not portfolio owner");
+        _;
+    }
+
+    modifier onlyAuthorizedRebalancer() {
+        require(authorizedRebalancers[msg.sender], "Not authorized rebalancer");
+        _;
+    }
+
+    modifier validRiskProfile(uint8 profile) {
+        require(profile >= 1 && profile <= 3, "Invalid risk profile");
+        _;
+    }
+
+    /**
+     * @dev Create a new portfolio with initial deposit
+     * @param _riskProfile Risk tolerance (1=conservative, 2=balanced, 3=aggressive)
+     */
+    function createPortfolio(uint8 _riskProfile) 
+        external 
+        payable 
+        validRiskProfile(_riskProfile)
+        whenNotPaused 
+    {
+        require(msg.value >= MIN_DEPOSIT, "Deposit below minimum");
+        require(portfolios[msg.sender].owner == address(0), "Portfolio exists");
+
+        Portfolio storage newPortfolio = portfolios[msg.sender];
+        newPortfolio.owner = msg.sender;
+        newPortfolio.totalValue = msg.value;
+        newPortfolio.lastRebalance = block.timestamp;
+        newPortfolio.riskProfile = _riskProfile;
+        newPortfolio.autoRebalanceEnabled = true;
+        newPortfolio.currentProtocol = "Native"; // Start with native token
+        newPortfolio.currentYield = 0;
+
+        totalManagedAssets += msg.value;
+
+        emit PortfolioCreated(msg.sender, msg.value, _riskProfile);
+    }
+
+    /**
+     * @dev Add funds to existing portfolio
+     */
+    function depositFunds() 
+        external 
+        payable 
+        onlyPortfolioOwner(msg.sender) 
+        whenNotPaused 
+    {
+        require(msg.value > 0, "Must deposit funds");
+        
+        portfolios[msg.sender].totalValue += msg.value;
+        totalManagedAssets += msg.value;
+    }
+
+    /**
+     * @dev Withdraw funds from portfolio
+     * @param _amount Amount to withdraw in wei
+     */
+    function withdrawFunds(uint256 _amount) 
+        external 
+        onlyPortfolioOwner(msg.sender) 
+        nonReentrant 
+        whenNotPaused 
+    {
+        Portfolio storage portfolio = portfolios[msg.sender];
+        require(portfolio.totalValue >= _amount, "Insufficient balance");
+        require(address(this).balance >= _amount, "Contract insufficient balance");
+
+        portfolio.totalValue -= _amount;
+        totalManagedAssets -= _amount;
+
+        payable(msg.sender).transfer(_amount);
+    }
+
+    /**
+     * @dev Update user's risk profile
+     * @param _newProfile New risk profile (1-3)
+     */
+    function updateRiskProfile(uint8 _newProfile) 
+        external 
+        onlyPortfolioOwner(msg.sender) 
+        validRiskProfile(_newProfile) 
+    {
+        portfolios[msg.sender].riskProfile = _newProfile;
+    }
+
+    /**
+     * @dev Toggle auto-rebalancing for user portfolio
+     */
+    function toggleAutoRebalance() external onlyPortfolioOwner(msg.sender) {
+        bool newStatus = !portfolios[msg.sender].autoRebalanceEnabled;
+        portfolios[msg.sender].autoRebalanceEnabled = newStatus;
+        
+        emit AutoRebalanceToggled(msg.sender, newStatus);
+    }
+
+    /**
+     * @dev Execute portfolio rebalancing (called by AI engine)
+     * @param _user User address
+     * @param _fromProtocol Current protocol
+     * @param _toProtocol Target protocol  
+     * @param _expectedYield Expected new yield in basis points
+     * @param _gasCost Estimated gas cost
+     */
+    function executeRebalance(
+        address _user,
+        string calldata _fromProtocol,
+        string calldata _toProtocol,
+        uint256 _expectedYield,
+        uint256 _gasCost
+    ) 
+        external 
+        onlyAuthorizedRebalancer 
+        whenNotPaused 
+    {
+        Portfolio storage portfolio = portfolios[_user];
+        
+        require(portfolio.owner != address(0), "Portfolio not found");
+        require(portfolio.autoRebalanceEnabled, "Auto-rebalance disabled");
+        require(_gasCost <= MAX_GAS_THRESHOLD, "Gas cost too high");
+
+        // Validate profitability
+        uint256 currentYield = portfolio.currentYield;
+        require(_expectedYield > currentYield, "Yield not improved");
+        
+        uint256 yieldImprovement = _expectedYield - currentYield;
+        uint256 annualProfit = (yieldImprovement * portfolio.totalValue) / 10000;
+        uint256 minProfit = (_gasCost * 10000) / MIN_PROFIT_BPS;
+        
+        require(annualProfit >= minProfit, "Insufficient profit potential");
+
+        // Update portfolio state
+        portfolio.currentProtocol = _toProtocol;
+        portfolio.currentYield = _expectedYield;
+        portfolio.lastRebalance = block.timestamp;
+
+        // Execute actual protocol interaction here
+        // This would call the appropriate protocol adapter
+
+        emit PortfolioRebalanced(
+            _user,
+            _fromProtocol,
+            _toProtocol,
+            portfolio.totalValue,
+            _expectedYield
+        );
+    }
+
+    /**
+     * @dev Check if rebalancing is profitable
+     * @param _user User address
+     * @param _newYield Potential new yield
+     * @param _gasCost Transaction cost
+     * @return profitable Whether rebalancing would be profitable
+     */
+    function checkRebalanceProfitability(
+        address _user,
+        uint256 _newYield,
+        uint256 _gasCost
+    ) external view returns (bool profitable) {
+        Portfolio storage portfolio = portfolios[_user];
+        
+        if (portfolio.owner == address(0) || !portfolio.autoRebalanceEnabled) {
+            return false;
+        }
+
+        uint256 currentYield = portfolio.currentYield;
+        if (_newYield <= currentYield) {
+            return false;
+        }
+
+        uint256 yieldImprovement = _newYield - currentYield;
+        uint256 annualProfit = (yieldImprovement * portfolio.totalValue) / 10000;
+        uint256 minProfit = (_gasCost * 10000) / MIN_PROFIT_BPS;
+
+        return annualProfit >= minProfit;
+    }
+
+    /**
+     * @dev Get portfolio information
+     * @param _user User address
+     * @return owner Portfolio owner
+     * @return totalValue Total portfolio value
+     * @return currentYield Current yield in basis points
+     * @return currentProtocol Current protocol name
+     * @return autoEnabled Auto-rebalance status
+     * @return riskProfile Risk profile (1-3)
+     */
+    function getPortfolio(address _user) 
+        external 
+        view 
+        returns (
+            address owner,
+            uint256 totalValue,
+            uint256 currentYield,
+            string memory currentProtocol,
+            bool autoEnabled,
+            uint8 riskProfile
+        ) 
+    {
+        Portfolio storage portfolio = portfolios[_user];
+        return (
+            portfolio.owner,
+            portfolio.totalValue,
+            portfolio.currentYield,
+            portfolio.currentProtocol,
+            portfolio.autoRebalanceEnabled,
+            portfolio.riskProfile
+        );
+    }
+
+    // Admin functions
+    function authorizeRebalancer(address _rebalancer, bool _authorized) 
+        external 
+        onlyOwner 
+    {
+        authorizedRebalancers[_rebalancer] = _authorized;
+        emit RebalancerAuthorized(_rebalancer, _authorized);
+    }
+
+    function setProtocolAdapter(string calldata _protocol, address _adapter) 
+        external 
+        onlyOwner 
+    {
+        protocolAdapters[_protocol] = _adapter;
+    }
+
+    function emergencyPause(string calldata _reason) external onlyOwner {
+        _pause();
+        emit EmergencyPause(msg.sender, _reason);
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    // Emergency withdrawal function
+    function emergencyWithdraw() external onlyOwner {
+        payable(owner()).transfer(address(this).balance);
+    }
+
+    // Receive function to accept ETH deposits
+    receive() external payable {
+        require(msg.value > 0, "No value sent");
+    }
+}
