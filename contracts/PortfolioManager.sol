@@ -192,7 +192,13 @@ contract PortfolioManager is ReentrancyGuard, Pausable, Ownable {
     /**
      * @dev Get portfolio information for a user
      * @param user User's address
-     * @return Portfolio data
+     * @return totalValue Portfolio total value
+     * @return currentYield Current yield percentage
+     * @return currentProtocol Current protocol name
+     * @return riskProfile Risk profile setting
+     * @return autoRebalanceEnabled Auto-rebalance status
+     * @return lastRebalance Last rebalance timestamp
+     * @return totalProfit Total profit generated
      */
     function getPortfolio(address user) external view returns (
         uint256 totalValue,

@@ -33,8 +33,21 @@ const CONTRACT_ADDRESSES = {
 };
 
 // Initialize blockchain connection
-const provider = new ethers.providers.JsonRpcProvider(process.env.FLARE_RPC_URL);
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+const provider = new ethers.providers.JsonRpcProvider(process.env.FLARE_RPC_URL || 'https://coston2-api.flare.network/ext/bc/C/rpc');
+
+// Initialize wallet only if private key is available
+let wallet = null;
+if (process.env.PRIVATE_KEY) {
+  try {
+    wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+    console.log('✅ Wallet initialized:', wallet.address);
+  } catch (error) {
+    console.warn('⚠️  Wallet initialization failed, running in demo mode');
+    wallet = null;
+  }
+} else {
+  console.log('ℹ️  No private key provided, running in demo mode');
+}
 
 /**
  * AI Yield Analyzer - Monitors DeFi protocols for yield opportunities

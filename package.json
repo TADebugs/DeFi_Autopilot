@@ -4,23 +4,38 @@
   "description": "AI-powered cross-chain yield optimization platform for XRPL/Flare",
   "main": "index.js",
   "scripts": {
-    "compile": "hardhat compile",
-    "test": "hardhat test",
-    "deploy": "hardhat run deployment/deploy.js --network flareTestnet",
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+    "deploy:flare": "npx hardhat run deployment/deploy.js --network flare",
+    "deploy:testnet": "npx hardhat run deployment/deploy.js --network flareTestnet",
     "backend": "cd backend && npm start",
     "frontend": "cd frontend && npm start",
     "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
-    "setup": "npm install && cd backend && npm install && cd ../frontend && npm install"
+    "setup": "npm install --force && cd backend && npm install && cd ../frontend && npm install",
+    "format:fix": "prettier --write .",
+    "lint:fix": "eslint . --fix"
   },
-  "keywords": ["defi", "yield-farming", "cross-chain", "xrpl", "flare", "ai"],
+  "keywords": [
+    "defi",
+    "yield-farming",
+    "cross-chain",
+    "xrpl",
+    "flare",
+    "ai"
+  ],
   "author": "DeFi Autopilot Team",
   "license": "MIT",
-  "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^3.0.2",
+  "dependencies": {
     "@openzeppelin/contracts": "^4.9.3",
-    "hardhat": "^2.17.1",
     "ethers": "^5.7.2",
-    "dotenv": "^16.3.1",
-    "concurrently": "^8.2.0"
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "hardhat": "^2.17.1",
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "@typechain/hardhat": "^6.1.6",
+    "concurrently": "^8.2.0",
+    "prettier": "^2.8.8",
+    "eslint": "^8.44.0"
   }
 }

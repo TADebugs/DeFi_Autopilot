@@ -125,15 +125,16 @@ contract RebalancingEngine is Ownable, Pausable, ReentrancyGuard {
         
         // Get user portfolio information
         (
-            address owner,
             uint256 totalValue,
             uint256 currentYield,
             string memory currentProtocol,
+            PortfolioManager.RiskProfile riskProfile,
             bool autoEnabled,
-            uint8 riskProfile
+            ,
+            
         ) = portfolioManager.getPortfolio(_user);
         
-        require(owner != address(0), "Portfolio not found");
+        // Check if portfolio exists and auto-rebalance is enabled
         require(autoEnabled, "Auto-rebalance disabled");
         require(totalValue > 0, "Empty portfolio");
         
@@ -195,11 +196,12 @@ contract RebalancingEngine is Ownable, Pausable, ReentrancyGuard {
         
         // Double-check profitability before execution
         (
-            ,
             uint256 totalValue,
             uint256 currentYield,
             ,
+            ,
             bool autoEnabled,
+            ,
             
         ) = portfolioManager.getPortfolio(request.user);
         
@@ -277,15 +279,16 @@ contract RebalancingEngine is Ownable, Pausable, ReentrancyGuard {
             
             // Get user portfolio
             (
-                address owner,
                 uint256 totalValue,
                 uint256 currentYield,
                 string memory currentProtocol,
+                PortfolioManager.RiskProfile riskProfile,
                 bool autoEnabled,
-                uint8 riskProfile
+                ,
+                
             ) = portfolioManager.getPortfolio(user);
             
-            if (owner == address(0) || !autoEnabled || totalValue == 0) {
+            if (!autoEnabled || totalValue == 0) {
                 continue;
             }
             
@@ -295,7 +298,7 @@ contract RebalancingEngine is Ownable, Pausable, ReentrancyGuard {
                 uint256 bestYield,
                 uint8 bestRiskScore
             ) = yieldOracle.getBestYieldForRisk(
-                _mapRiskProfile(riskProfile),
+                _mapRiskProfile(uint8(riskProfile)),
                 50000000 * 1e18 // $50M minimum TVL
             );
             
@@ -303,7 +306,7 @@ contract RebalancingEngine is Ownable, Pausable, ReentrancyGuard {
             if (
                 bytes(bestProtocol).length > 0 &&
                 bestYield > currentYield &&
-                bestRiskScore <= _mapRiskProfile(riskProfile)
+                bestRiskScore <= _mapRiskProfile(uint8(riskProfile))
             ) {
                 uint256 estimatedGas = _estimateGasCost(currentProtocol, bestProtocol);
                 
