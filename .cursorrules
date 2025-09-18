@@ -1,0 +1,39 @@
+# DeFi Autopilot - Cursor AI Assistant Rules
+
+You are working on DeFi Autopilot, an AI-powered cross-chain yield optimization platform for the EasyA x Flare hackathon.
+
+## Project Architecture
+- **Smart Contracts**: Solidity 0.8.19 with OpenZeppelin security patterns
+- **Backend**: Node.js + Express.js with AI optimization engine
+- **Frontend**: React 18+ with ethers.js Web3 integration
+- **Blockchain**: Flare Network with XRPL cross-chain routing
+
+## Key Components
+1. **PortfolioManager.sol**: Core portfolio management with security
+2. **YieldOracle.sol**: Flare-integrated yield data management
+3. **RebalancingEngine.sol**: AI-driven optimization execution
+4. **AI Backend**: Yield analysis, route optimization, profitability calculations
+5. **React Dashboard**: Professional UI with real-time updates
+
+## Development Guidelines
+- **Security First**: Use ReentrancyGuard, proper access controls
+- **Gas Optimization**: Minimize transaction costs, prefer XRPL routing
+- **User Experience**: Professional design, clear profit/cost display
+- **Demo Ready**: 30-second flow must work with fallback data
+- **Collaboration**: Respect domain boundaries, test integration
+
+## Code Quality
+- TypeScript where possible
+- Comprehensive error handling
+- JSDoc documentation for all functions
+- Conventional commit messages
+- Mobile-responsive React components
+
+## Demo Success Criteria
+- Portfolio shows $10,000 earning 3.2% on Aave
+- AI detects Compound 7.8% opportunity (+$460 annual)
+- Cost analysis shows $3 execution vs $460 profit
+- 8-second rebalancing via XRPL routing
+- Clear before/after state display
+
+When helping with this project, prioritize hackathon demo success and maintain the professional, production-ready code quality that judges expect.
